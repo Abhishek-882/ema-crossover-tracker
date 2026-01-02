@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //| GoldTrendEA_Complete.mq4                                         |
 //| COMPLETE CONSOLIDATED EXPERT ADVISOR                             |
-//| Version: 1.0 | Date: 2026-01-01                                  |
+//| Version: 1.1 | Date: 2026-01-02                                  |
 //| 2-Candle EMA Crossover with ADX Confirmation Strategy            |
 //+------------------------------------------------------------------+
 //| STRATEGY SUMMARY:                                                |
@@ -13,23 +13,22 @@
 //+------------------------------------------------------------------+
 #property copyright "Expert Advisor Builder"
 #property link      ""
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 //+------------------------------------------------------------------+
 //| ===================== SECTION 1: CONFIG ======================== |
 //| Central Configuration and Constants Hub                          |
-//| Estimated Lines: ~635                                            |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
 //| PROJECT INFORMATION                                              |
 //+------------------------------------------------------------------+
 #define EA_NAME           "GoldTrendEA"
-#define EA_VERSION        "1.0"
+#define EA_VERSION        "1.1"
 #define EA_DESCRIPTION    "GOLD Trend Confirmation with 2-Candle System"
 #define EA_AUTHOR         "Expert Advisor Builder"
-#define EA_DATE           "2026-01-01"
+#define EA_DATE           "2026-01-02"
 #define EA_BROKER_TYPE    "3-Decimal (GOLD)"
 
 //+------------------------------------------------------------------+
@@ -44,8 +43,8 @@
 //+------------------------------------------------------------------+
 
 input string   _1_EntrySettings = "=== ENTRY SIGNAL SETTINGS ===";   // --- Entry Settings ---
-input int      Candle_Size_Min_Pips = 400;           // Minimum candle body size (pips)
-input int      Candle_Size_Max_Pips = 600;           // Maximum candle body size (pips)
+input int      Candle_Size_Min_Pips = 400;           // Minimum candle body size (pips) [4$ = 400 pips]
+input int      Candle_Size_Max_Pips = 600;           // Maximum candle body size (pips) [6$ = 600 pips]
 input int      Candle_Size_Tolerance_Pct = 90;       // 2nd candle tolerance % of 1st candle
 input int      ADX_Period = 14;                       // ADX calculation period
 input int      EMA_Period = 50;                       // EMA calculation period
@@ -68,19 +67,20 @@ input int      Fixed_TP_Pips = 2000;                 // Fixed Take Profit in pip
 input int      Trailing_Activation_Pips = 1000;      // Trailing stop activation profit
 input int      Trailing_Distance_Pips = 1000;        // Trailing stop distance behind high/low
 input int      Trailing_Stop_Step_Pips = 100;        // Trailing stop update step size
-input int      Averaging_Drawdown_Pips = -800;       // Averaging trigger drawdown pips
+input int      Averaging_Drawdown_Pips = 800;        // Averaging trigger drawdown pips (positive value)
 input double   Profit_Close_Threshold = 1.00;        // Combined profit threshold for close ($)
 input int      Max_Slippage_Pips = 200;              // Maximum acceptable slippage
 
 //+------------------------------------------------------------------+
 //| ENUMS - SIGNAL AND TRADE STATES                                  |
+//| NOTE: Using EA_ prefix to avoid conflicts with MQL5 constants    |
 //+------------------------------------------------------------------+
 
-// Order type enumeration
-enum ENUM_ORDER_TYPE_EA {
-    ORDER_TYPE_BUY = 0,                              // Buy order
-    ORDER_TYPE_SELL = 1,                             // Sell order
-    ORDER_TYPE_NONE = 2                              // No active order
+// Order type enumeration (EA-specific to avoid MQL5 conflicts)
+enum ENUM_EA_ORDER_TYPE {
+    EA_ORDER_BUY = 0,                                // Buy order
+    EA_ORDER_SELL = 1,                               // Sell order
+    EA_ORDER_NONE = 2                                // No active order
 };
 
 // Trade phase enumeration - tracks entry confirmation progress
@@ -92,7 +92,7 @@ enum ENUM_TRADE_PHASE {
     PHASE_ENTRY_EXECUTED = 4                         // Order opened
 };
 
-// Exit reason enumeration - identifies which exit condition triggered
+// Exit reason enumeration
 enum ENUM_EXIT_REASON {
     EXIT_REASON_NONE = 0,                            // Trade still open
     EXIT_REASON_TP = 1,                              // Take profit hit
@@ -104,7 +104,7 @@ enum ENUM_EXIT_REASON {
     EXIT_REASON_ERROR = 7                            // Error during trade
 };
 
-// Signal state enumeration - current signal status
+// Signal state enumeration
 enum ENUM_SIGNAL_STATE {
     SIGNAL_STATE_NONE = 0,                           // No signal
     SIGNAL_STATE_BUY_FORMING = 1,                    // Buy signal forming
@@ -119,9 +119,9 @@ enum ENUM_SIGNAL_STATE {
 //| STRUCTURES - TRADE AND ORDER DATA                                |
 //+------------------------------------------------------------------+
 
-// Trade setup structure - stores confirmed entry signal details
+// Trade setup structure
 struct TradeSetup {
-    ENUM_ORDER_TYPE_EA orderType;                    // BUY or SELL
+    ENUM_EA_ORDER_TYPE orderType;                    // BUY or SELL
     double entryPrice;                               // Entry price for 3rd candle
     double stopLossPrice;                            // SL price (from opposite signal)
     double takeProfitPrice;                          // TP price (fixed pips)
@@ -137,16 +137,16 @@ struct TradeSetup {
     bool isValid;                                    // Setup validation flag
 };
 
-// Order data structure - tracks active order details
+// Order data structure
 struct OrderData {
     int ticket;                                      // Order ticket number
-    ENUM_ORDER_TYPE_EA orderType;                    // BUY or SELL
+    ENUM_EA_ORDER_TYPE orderType;                    // BUY or SELL
     double lots;                                     // Order volume in lots
     double entryPrice;                               // Entry execution price
     double currentSL;                                // Current stop loss
     double currentTP;                                // Current take profit
-    double highestPrice;                             // Highest price since entry (for trailing)
-    double lowestPrice;                              // Lowest price since entry (for trailing)
+    double highestPrice;                             // Highest price since entry
+    double lowestPrice;                              // Lowest price since entry
     double floatingProfit;                           // Current floating profit
     datetime openTime;                               // Order open time
     datetime modifyTime;                             // Last modification time
@@ -156,7 +156,7 @@ struct OrderData {
     int totalModifications;                          // Count of modifications
 };
 
-// Averaging basket structure - tracks initial + averaging orders
+// Averaging basket structure
 struct AveragingBasket {
     int mainOrderTicket;                             // Main order (0.01 lots)
     int averagingOrderTicket;                        // Averaging order (0.03 lots)
@@ -172,7 +172,7 @@ struct AveragingBasket {
     bool isValid;                                    // Basket validation flag
 };
 
-// Statistics structure - tracks performance metrics
+// Statistics structure
 struct Statistics {
     int totalTrades;                                 // Total trades executed
     int winTrades;                                   // Winning trades count
@@ -195,7 +195,7 @@ struct Statistics {
 //+------------------------------------------------------------------+
 
 // Current trade state
-ENUM_ORDER_TYPE_EA CurrentOrderType = ORDER_TYPE_NONE;
+ENUM_EA_ORDER_TYPE CurrentOrderType = EA_ORDER_NONE;
 ENUM_TRADE_PHASE CurrentPhase = PHASE_NO_SIGNAL;
 ENUM_SIGNAL_STATE CurrentSignalState = SIGNAL_STATE_NONE;
 ENUM_EXIT_REASON LastExitReason = EXIT_REASON_NONE;
@@ -252,12 +252,6 @@ double CurrentDrawdown = 0.0;
 #define COLOR_WARNING          clrOrange
 #define COLOR_ERROR            clrDarkRed
 
-#define ICON_BUY               "►"
-#define ICON_SELL              "◄"
-#define ICON_CHECK             "✓"
-#define ICON_CROSS             "✗"
-#define ICON_WARNING           "⚠"
-
 //+------------------------------------------------------------------+
 //| CONSTANTS - VALIDATION RANGES                                    |
 //+------------------------------------------------------------------+
@@ -308,24 +302,13 @@ double CurrentDrawdown = 0.0;
 //+------------------------------------------------------------------+
 //| =================== SECTION 2: UTILITY ========================= |
 //| Helper Functions for Price, Lots, and Candle Data                |
-//| Estimated Lines: ~400                                            |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| PRICE CONVERSION FUNCTIONS                                       |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
 //| FUNCTION: PriceToPips()                                          |
 //| Purpose: Convert price difference to pips                        |
-//| Input:   priceValue - price difference in price units            |
-//| Returns: Value in pips                                           |
 //+------------------------------------------------------------------+
 double PriceToPips(double priceValue) {
-    // For 3-digit (GOLD) and 5-digit (forex) brokers
-    // Point is the smallest price unit (e.g., 0.001 for GOLD 3-digit)
-    // 1 pip = 10 points for 3-digit GOLD, 10 points for 5-digit forex
-    
     double pipValue = 0.0;
     
     if (Digits == 3 || Digits == 5) {
@@ -333,7 +316,6 @@ double PriceToPips(double priceValue) {
     } else if (Digits == 2 || Digits == 4) {
         pipValue = priceValue / Point;
     } else {
-        // Default to 10 points per pip
         pipValue = priceValue / (Point * 10);
     }
     
@@ -343,8 +325,6 @@ double PriceToPips(double priceValue) {
 //+------------------------------------------------------------------+
 //| FUNCTION: PipsToPrice()                                          |
 //| Purpose: Convert pips to price units                             |
-//| Input:   pips - value in pips                                    |
-//| Returns: Value in price units                                    |
 //+------------------------------------------------------------------+
 double PipsToPrice(double pips) {
     double priceValue = 0.0;
@@ -361,143 +341,53 @@ double PipsToPrice(double pips) {
 }
 
 //+------------------------------------------------------------------+
+//| FUNCTION: NormalizeLots()                                        |
+//| Purpose: Normalize lot size to broker specifications             |
+//+------------------------------------------------------------------+
+double NormalizeLots(double lots) {
+    double minLot = MarketInfo(Symbol(), MODE_MINLOT);
+    double maxLot = MarketInfo(Symbol(), MODE_MAXLOT);
+    double lotStep = MarketInfo(Symbol(), MODE_LOTSTEP);
+    
+    if (minLot <= 0) minLot = 0.01;
+    if (maxLot <= 0) maxLot = 100.0;
+    if (lotStep <= 0) lotStep = 0.01;
+    
+    lots = MathMax(lots, minLot);
+    lots = MathMin(lots, maxLot);
+    lots = MathFloor(lots / lotStep) * lotStep;
+    
+    return NormalizeDouble(lots, 2);
+}
+
+//+------------------------------------------------------------------+
 //| FUNCTION: NormalizePrice()                                       |
-//| Purpose: Normalize price to correct decimal places               |
-//| Input:   price - price to normalize                              |
-//| Returns: Normalized price                                        |
+//| Purpose: Normalize price to symbol digits                        |
 //+------------------------------------------------------------------+
 double NormalizePrice(double price) {
     return NormalizeDouble(price, Digits);
 }
 
 //+------------------------------------------------------------------+
-//| LOT NORMALIZATION FUNCTIONS                                      |
+//| CANDLE DATA FUNCTIONS                                            |
 //+------------------------------------------------------------------+
 
-//+------------------------------------------------------------------+
-//| FUNCTION: GetSymbolMinLot()                                      |
-//| Purpose: Get minimum lot size for current symbol                 |
-//| Returns: Minimum lot size                                        |
-//+------------------------------------------------------------------+
-double GetSymbolMinLot() {
-    return MarketInfo(Symbol(), MODE_MINLOT);
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: GetSymbolMaxLot()                                      |
-//| Purpose: Get maximum lot size for current symbol                 |
-//| Returns: Maximum lot size                                        |
-//+------------------------------------------------------------------+
-double GetSymbolMaxLot() {
-    return MarketInfo(Symbol(), MODE_MAXLOT);
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: GetSymbolLotStep()                                     |
-//| Purpose: Get lot step for current symbol                         |
-//| Returns: Lot step                                                |
-//+------------------------------------------------------------------+
-double GetSymbolLotStep() {
-    return MarketInfo(Symbol(), MODE_LOTSTEP);
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: NormalizeLots()                                        |
-//| Purpose: Normalize lot size to broker requirements               |
-//| Input:   lots - lot size to normalize                            |
-//| Returns: Normalized lot size                                     |
-//+------------------------------------------------------------------+
-double NormalizeLots(double lots) {
-    double minLot = GetSymbolMinLot();
-    double maxLot = GetSymbolMaxLot();
-    double lotStep = GetSymbolLotStep();
-    
-    // Ensure above minimum
-    if (lots < minLot) {
-        lots = minLot;
-    }
-    
-    // Ensure below maximum
-    if (lots > maxLot) {
-        lots = maxLot;
-    }
-    
-    // Round to lot step
-    lots = MathRound(lots / lotStep) * lotStep;
-    
-    // Normalize to 2 decimal places
-    lots = NormalizeDouble(lots, 2);
-    
-    return lots;
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: ValidateAccountBalance()                               |
-//| Purpose: Check if account has sufficient balance for trade       |
-//| Input:   lots - lot size to trade                                |
-//| Returns: true if sufficient, false otherwise                     |
-//+------------------------------------------------------------------+
-bool ValidateAccountBalance(double lots) {
-    double requiredMargin = MarketInfo(Symbol(), MODE_MARGINREQUIRED) * lots;
-    double freeMargin = AccountFreeMargin();
-    
-    if (freeMargin < requiredMargin * 1.2) {  // 20% safety buffer
-        return false;
-    }
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| CANDLE DATA ACCESS FUNCTIONS                                     |
-//+------------------------------------------------------------------+
-
-//+------------------------------------------------------------------+
-//| FUNCTION: GetCandleOpen()                                        |
-//| Purpose: Get open price of specified bar                         |
-//| Input:   shift - bar index (0 = current, 1 = previous closed)    |
-//| Returns: Open price                                              |
-//+------------------------------------------------------------------+
 double GetCandleOpen(int shift) {
     return iOpen(Symbol(), Period(), shift);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: GetCandleClose()                                       |
-//| Purpose: Get close price of specified bar                        |
-//| Input:   shift - bar index                                       |
-//| Returns: Close price                                             |
-//+------------------------------------------------------------------+
 double GetCandleClose(int shift) {
     return iClose(Symbol(), Period(), shift);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: GetCandleHigh()                                        |
-//| Purpose: Get high price of specified bar                         |
-//| Input:   shift - bar index                                       |
-//| Returns: High price                                              |
-//+------------------------------------------------------------------+
 double GetCandleHigh(int shift) {
     return iHigh(Symbol(), Period(), shift);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: GetCandleLow()                                         |
-//| Purpose: Get low price of specified bar                          |
-//| Input:   shift - bar index                                       |
-//| Returns: Low price                                               |
-//+------------------------------------------------------------------+
 double GetCandleLow(int shift) {
     return iLow(Symbol(), Period(), shift);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: GetBarTime()                                           |
-//| Purpose: Get open time of specified bar                          |
-//| Input:   shift - bar index                                       |
-//| Returns: Bar open time                                           |
-//+------------------------------------------------------------------+
 datetime GetBarTime(int shift) {
     return iTime(Symbol(), Period(), shift);
 }
@@ -505,8 +395,6 @@ datetime GetBarTime(int shift) {
 //+------------------------------------------------------------------+
 //| FUNCTION: GetCandleBodySize()                                    |
 //| Purpose: Calculate body size of candle in pips                   |
-//| Input:   shift - bar index                                       |
-//| Returns: Body size in pips (absolute value)                      |
 //+------------------------------------------------------------------+
 double GetCandleBodySize(int shift) {
     double openPrice = GetCandleOpen(shift);
@@ -519,7 +407,6 @@ double GetCandleBodySize(int shift) {
 //+------------------------------------------------------------------+
 //| FUNCTION: GetCandleDirection()                                   |
 //| Purpose: Determine if candle is bullish or bearish               |
-//| Input:   shift - bar index                                       |
 //| Returns: 1 = bullish, -1 = bearish, 0 = doji                     |
 //+------------------------------------------------------------------+
 int GetCandleDirection(int shift) {
@@ -537,9 +424,6 @@ int GetCandleDirection(int shift) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: IsBullishCandle()                                      |
-//| Purpose: Check if candle is bullish                              |
-//| Input:   shift - bar index                                       |
-//| Returns: true if bullish, false otherwise                        |
 //+------------------------------------------------------------------+
 bool IsBullishCandle(int shift) {
     return GetCandleDirection(shift) == 1;
@@ -547,9 +431,6 @@ bool IsBullishCandle(int shift) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: IsBearishCandle()                                      |
-//| Purpose: Check if candle is bearish                              |
-//| Input:   shift - bar index                                       |
-//| Returns: true if bearish, false otherwise                        |
 //+------------------------------------------------------------------+
 bool IsBearishCandle(int shift) {
     return GetCandleDirection(shift) == -1;
@@ -557,9 +438,6 @@ bool IsBearishCandle(int shift) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: IsSpreadAcceptable()                                   |
-//| Purpose: Check if current spread is within acceptable range      |
-//| Input:   maxAllowedPips - maximum acceptable spread in pips      |
-//| Returns: true if spread <= max, false otherwise                  |
 //+------------------------------------------------------------------+
 bool IsSpreadAcceptable(double maxAllowedPips) {
     RefreshRates();
@@ -575,9 +453,6 @@ bool IsSpreadAcceptable(double maxAllowedPips) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: GetErrorDescription()                                  |
-//| Purpose: Convert error code to human-readable description        |
-//| Input:   errorCode - error code to translate                     |
-//| Returns: Error description string                                |
 //+------------------------------------------------------------------+
 string GetErrorDescription(int errorCode) {
     switch (errorCode) {
@@ -607,12 +482,12 @@ string GetErrorDescription(int errorCode) {
         case 139:   return "Order is locked";
         case 140:   return "Long positions only allowed";
         case 141:   return "Too many requests";
-        case 145:   return "Modification denied because order is too close to market";
+        case 145:   return "Modification denied - order too close to market";
         case 146:   return "Trade context is busy";
-        case 147:   return "Expirations are denied on this symbol";
-        case 148:   return "Trade operations are allowed only for live accounts";
+        case 147:   return "Expirations are denied";
+        case 148:   return "Live accounts only";
         case 149:   return "Order is not in the book";
-        case 150:   return "Notifications are disabled";
+        case 150:   return "Notifications disabled";
         case 151:   return "Operation is prohibited";
         case 152:   return "Too many open positions";
         
@@ -626,22 +501,19 @@ string GetErrorDescription(int errorCode) {
         case ERR_ORDER_CLOSE_FAILED: return "Order close failed";
         case ERR_INSUFFICIENT_FUNDS: return "Insufficient funds";
         case ERR_INVALID_LOT_SIZE:  return "Invalid lot size";
-        case ERR_SLIPPAGE_EXCEEDED: return "Slippage exceeded maximum allowed";
-        case ERR_EMA_NOT_READY:     return "EMA indicator not ready";
-        case ERR_ADX_NOT_READY:     return "ADX indicator not ready";
+        case ERR_SLIPPAGE_EXCEEDED: return "Slippage exceeded";
+        case ERR_EMA_NOT_READY:     return "EMA not ready";
+        case ERR_ADX_NOT_READY:     return "ADX not ready";
         case ERR_CANDLE_NOT_READY:  return "Candle data not ready";
         case ERR_TRADE_ALREADY_OPEN: return "Trade already open";
-        case ERR_NO_OPPOSITE_SIGNAL: return "No opposite signal detected";
+        case ERR_NO_OPPOSITE_SIGNAL: return "No opposite signal";
         
-        default:    return "Unknown error code: " + IntegerToString(errorCode);
+        default:    return "Unknown error: " + IntegerToString(errorCode);
     }
 }
 
 //+------------------------------------------------------------------+
 //| FUNCTION: GetTimeframeString()                                   |
-//| Purpose: Convert period enum to readable string                  |
-//| Input:   period - timeframe period                               |
-//| Returns: Timeframe string (e.g., "H1", "M15")                    |
 //+------------------------------------------------------------------+
 string GetTimeframeString(int period) {
     switch(period) {
@@ -660,9 +532,6 @@ string GetTimeframeString(int period) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: GetPhaseString()                                       |
-//| Purpose: Convert phase enum to readable string                   |
-//| Input:   phase - trade phase enum                                |
-//| Returns: Phase description string                                |
 //+------------------------------------------------------------------+
 string GetPhaseString(ENUM_TRADE_PHASE phase) {
     switch(phase) {
@@ -677,9 +546,6 @@ string GetPhaseString(ENUM_TRADE_PHASE phase) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: GetSignalStateString()                                 |
-//| Purpose: Convert signal state enum to readable string            |
-//| Input:   state - signal state enum                               |
-//| Returns: Signal state description string                         |
 //+------------------------------------------------------------------+
 string GetSignalStateString(ENUM_SIGNAL_STATE state) {
     switch(state) {
@@ -696,8 +562,6 @@ string GetSignalStateString(ENUM_SIGNAL_STATE state) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: ValidateInputParameters()                              |
-//| Purpose: Validate all user input parameters against ranges       |
-//| Returns: true if all inputs valid, false if any invalid          |
 //+------------------------------------------------------------------+
 bool ValidateInputParameters() {
     // Validate candle size range
@@ -763,9 +627,9 @@ bool ValidateInputParameters() {
         return false;
     }
     
-    // Validate averaging drawdown (should be negative)
-    if (Averaging_Drawdown_Pips > -100 || Averaging_Drawdown_Pips < -2000) {
-        Alert("ERROR: Averaging Drawdown must be between -100 and -2000 pips");
+    // Validate averaging drawdown (positive value)
+    if (Averaging_Drawdown_Pips < 100 || Averaging_Drawdown_Pips > 2000) {
+        Alert("ERROR: Averaging Drawdown must be between 100 and 2000 pips");
         return false;
     }
     
@@ -782,10 +646,6 @@ bool ValidateInputParameters() {
 //| INITIALIZATION HELPER FUNCTIONS                                  |
 //+------------------------------------------------------------------+
 
-//+------------------------------------------------------------------+
-//| FUNCTION: InitializeStatistics()                                 |
-//| Purpose: Reset statistics to initial state                       |
-//+------------------------------------------------------------------+
 void InitializeStatistics() {
     Stats.totalTrades = 0;
     Stats.winTrades = 0;
@@ -803,13 +663,9 @@ void InitializeStatistics() {
     Stats.isValid = true;
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: InitializeOrderData()                                  |
-//| Purpose: Reset current order data to default state               |
-//+------------------------------------------------------------------+
 void InitializeOrderData() {
     CurrentOrder.ticket = -1;
-    CurrentOrder.orderType = ORDER_TYPE_NONE;
+    CurrentOrder.orderType = EA_ORDER_NONE;
     CurrentOrder.lots = 0.0;
     CurrentOrder.entryPrice = 0.0;
     CurrentOrder.currentSL = 0.0;
@@ -825,12 +681,8 @@ void InitializeOrderData() {
     CurrentOrder.totalModifications = 0;
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: InitializeTradeSetup()                                 |
-//| Purpose: Reset pending trade setup to default state              |
-//+------------------------------------------------------------------+
 void InitializeTradeSetup() {
-    PendingSetup.orderType = ORDER_TYPE_NONE;
+    PendingSetup.orderType = EA_ORDER_NONE;
     PendingSetup.entryPrice = 0.0;
     PendingSetup.stopLossPrice = 0.0;
     PendingSetup.takeProfitPrice = 0.0;
@@ -846,10 +698,6 @@ void InitializeTradeSetup() {
     PendingSetup.isValid = false;
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: InitializeAveragingBasket()                            |
-//| Purpose: Reset averaging basket to default state                 |
-//+------------------------------------------------------------------+
 void InitializeAveragingBasket() {
     Basket.mainOrderTicket = -1;
     Basket.averagingOrderTicket = -1;
@@ -865,12 +713,8 @@ void InitializeAveragingBasket() {
     Basket.isValid = false;
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: ResetGlobalState()                                     |
-//| Purpose: Reset all global variables to initial state             |
-//+------------------------------------------------------------------+
 void ResetGlobalState() {
-    CurrentOrderType = ORDER_TYPE_NONE;
+    CurrentOrderType = EA_ORDER_NONE;
     CurrentPhase = PHASE_NO_SIGNAL;
     CurrentSignalState = SIGNAL_STATE_NONE;
     LastExitReason = EXIT_REASON_NONE;
@@ -905,102 +749,48 @@ void ResetGlobalState() {
 //+------------------------------------------------------------------+
 //| ==================== SECTION 3: LOGGER ========================= |
 //| Logging and Debugging Functions                                  |
-//| Estimated Lines: ~300 (simplified)                               |
 //+------------------------------------------------------------------+
 
-// Log level flags
 bool EnableTradeLog = true;
 bool EnableErrorLog = true;
 bool EnableSignalLog = true;
 bool EnableDebugLog = false;
 bool EnableInfoLog = true;
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogInfo()                                              |
-//| Purpose: Log informational message                               |
-//+------------------------------------------------------------------+
 void LogInfo(string message) {
-    if (!EnableInfoLog) return;
-    Print("INFO: ", message);
+    if (EnableInfoLog) Print("[INFO] ", message);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogDebug()                                             |
-//| Purpose: Log debug message                                       |
-//+------------------------------------------------------------------+
 void LogDebug(string message) {
-    if (!EnableDebugLog) return;
-    Print("DEBUG: ", message);
+    if (EnableDebugLog) Print("[DEBUG] ", message);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogError()                                             |
-//| Purpose: Log error event with context                            |
-//+------------------------------------------------------------------+
-void LogError(int errorCode, string errorContext, string additionalInfo = "") {
-    if (!EnableErrorLog) return;
-    Print("ERROR [", errorCode, "]: ", errorContext, " | ", GetErrorDescription(errorCode), 
-          (additionalInfo != "" ? " | " + additionalInfo : ""));
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: LogWarning()                                           |
-//| Purpose: Log warning event                                       |
-//+------------------------------------------------------------------+
-void LogWarning(string message) {
-    Print("WARNING: ", message);
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: LogWarn()                                              |
-//| Purpose: Log warning event (alias)                               |
-//+------------------------------------------------------------------+
 void LogWarn(string message) {
-    Print("WARNING: ", message);
+    if (EnableInfoLog) Print("[WARN] ", message);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogTradeEntry()                                        |
-//| Purpose: Log trade entry event with full details                 |
-//+------------------------------------------------------------------+
+void LogWarning(string message) {
+    LogWarn(message);
+}
+
+void LogError(int errorCode, string functionName, string message) {
+    if (EnableErrorLog) {
+        Print("[ERROR] ", functionName, " | Code: ", errorCode, " | ", message);
+        ErrorCount++;
+    }
+}
+
 void LogTradeEntry(int ticket, int orderType, double lots, double entryPrice, double sl, double tp) {
     if (!EnableTradeLog) return;
     
-    string orderTypeStr = (orderType == OP_BUY) ? "BUY" : "SELL";
-    Print("========== TRADE ENTRY ==========");
-    Print("Ticket: ", ticket);
-    Print("Type: ", orderTypeStr);
-    Print("Lots: ", DoubleToString(lots, 2));
-    Print("Entry Price: ", DoubleToString(entryPrice, Digits));
-    Print("SL: ", (sl > 0 ? DoubleToString(sl, Digits) : "None"));
-    Print("TP: ", (tp > 0 ? DoubleToString(tp, Digits) : "None"));
-    Print("Balance: ", DoubleToString(AccountBalance(), 2));
-    Print("=================================");
+    string typeStr = (orderType == OP_BUY) ? "BUY" : "SELL";
+    Print("TRADE ENTRY: Ticket ", ticket, " | ", typeStr, 
+          " | Lots: ", DoubleToString(lots, 2), 
+          " | Entry: ", DoubleToString(entryPrice, Digits),
+          " | SL: ", DoubleToString(sl, Digits),
+          " | TP: ", DoubleToString(tp, Digits));
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogTradeExit()                                         |
-//| Purpose: Log trade exit event with results                       |
-//+------------------------------------------------------------------+
-void LogTradeExit(int ticket, int orderType, double lots, double entryPrice, double exitPrice, double profit, string exitReason) {
-    if (!EnableTradeLog) return;
-    
-    string orderTypeStr = (orderType == OP_BUY) ? "BUY" : "SELL";
-    Print("========== TRADE EXIT ==========");
-    Print("Ticket: ", ticket);
-    Print("Type: ", orderTypeStr);
-    Print("Lots: ", DoubleToString(lots, 2));
-    Print("Entry: ", DoubleToString(entryPrice, Digits));
-    Print("Exit: ", DoubleToString(exitPrice, Digits));
-    Print("Profit: ", DoubleToString(profit, 2));
-    Print("Reason: ", exitReason);
-    Print("=================================");
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: Log1stCandleDetected()                                 |
-//| Purpose: Log 1st candle confirmation detection                   |
-//+------------------------------------------------------------------+
 void Log1stCandleDetected(int orderType, double candleSize, double emaValue) {
     if (!EnableSignalLog) return;
     
@@ -1009,10 +799,6 @@ void Log1stCandleDetected(int orderType, double candleSize, double emaValue) {
           " | Size: ", DoubleToString(candleSize, 1), " pips | EMA: ", DoubleToString(emaValue, Digits));
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: Log2ndCandleConfirmed()                                |
-//| Purpose: Log 2nd candle confirmation                             |
-//+------------------------------------------------------------------+
 void Log2ndCandleConfirmed(int orderType, double candleSize, double tolerance) {
     if (!EnableSignalLog) return;
     
@@ -1021,10 +807,6 @@ void Log2ndCandleConfirmed(int orderType, double candleSize, double tolerance) {
           " | Size: ", DoubleToString(candleSize, 1), " pips | Tolerance: ", DoubleToString(tolerance, 1), "%");
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogADXCheck()                                          |
-//| Purpose: Log ADX verification result                             |
-//+------------------------------------------------------------------+
 void LogADXCheck(double adxValue, bool passed) {
     if (!EnableSignalLog) return;
     
@@ -1032,59 +814,31 @@ void LogADXCheck(double adxValue, bool passed) {
     Print("ADX CHECK: Value=", DoubleToString(adxValue, 2), " | Threshold=", ADX_Threshold, " | ", result);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogOrderOpening()                                      |
-//| Purpose: Log order opening details                               |
-//+------------------------------------------------------------------+
 void LogOrderOpening(int ticket, string symbol, int orderType, double lots, 
                      double entryPrice, double sl, double tp, int magicNumber) {
     LogTradeEntry(ticket, orderType, lots, entryPrice, sl, tp);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogOrderModification()                                 |
-//| Purpose: Log order modification event                            |
-//+------------------------------------------------------------------+
 void LogOrderModification(int ticket, double oldSL, double newSL, double oldTP, double newTP) {
     Print("ORDER MODIFY: Ticket ", ticket, " | SL: ", oldSL, " -> ", newSL, " | TP: ", oldTP, " -> ", newTP);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogPartialClose()                                      |
-//| Purpose: Log partial close event                                 |
-//+------------------------------------------------------------------+
 void LogPartialClose(int ticket, double lotsRemaining, double lotsClosed, double profit) {
     Print("PARTIAL CLOSE: Ticket ", ticket, " | Closed: ", lotsClosed, " | Remaining: ", lotsRemaining, " | Profit: ", profit);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogOrderClosure()                                      |
-//| Purpose: Log order closure details                               |
-//+------------------------------------------------------------------+
 void LogOrderClosure(int ticket, string symbol, int orderType, double lots, double entryPrice, double exitPrice) {
     Print("ORDER CLOSED: Ticket ", ticket, " | Entry: ", entryPrice, " | Exit: ", exitPrice);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogPartialClosure()                                    |
-//| Purpose: Log partial closure details                             |
-//+------------------------------------------------------------------+
 void LogPartialClosure(int ticket, string symbol, int orderType, double lotsClosed, double lotsRemaining, double entryPrice, double exitPrice) {
     Print("PARTIAL CLOSE: Ticket ", ticket, " | Closed: ", lotsClosed, " | Remaining: ", lotsRemaining);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: LogAveragingEntry()                                    |
-//| Purpose: Log averaging order entry                               |
-//+------------------------------------------------------------------+
 void LogAveragingEntry(int ticket, int mainTicket, double lots, double entryPrice, double drawdown) {
     Print("AVERAGING ORDER: Ticket: ", ticket, " | Main: ", mainTicket, " | Lots: ", lots, " | Drawdown: ", drawdown);
 }
 
-//+------------------------------------------------------------------+
-//| FUNCTION: UpdateChartComment()                                   |
-//| Purpose: Update chart comment with current EA status             |
-//+------------------------------------------------------------------+
 void UpdateChartComment(string message) {
     string comment = "\n";
     comment += "================================\n";
@@ -1108,16 +862,13 @@ void UpdateChartComment(string message) {
 //+------------------------------------------------------------------+
 //| =================== SECTION 4: STRATEGY ======================== |
 //| Core Signal Detection - EMA, Crossover, ADX                      |
-//| Estimated Lines: ~500                                            |
 //+------------------------------------------------------------------+
 
-// Strategy constants
 #define MIN_BARS_FOR_EMA 100
 #define MIN_BARS_FOR_ADX 50
 #define EMA_CACHE_SIZE 10
 #define ADX_CACHE_SIZE 10
 
-// Strategy global variables
 double EMA_Buffer[10];
 int EMA_BufferIndex = 0;
 bool EMA_Ready = false;
@@ -1131,7 +882,7 @@ bool ADX_Ready = false;
 datetime LastADX_Calculation = 0;
 
 bool CrossoverDetected = false;
-ENUM_ORDER_TYPE_EA CrossoverType = ORDER_TYPE_NONE;
+ENUM_EA_ORDER_TYPE CrossoverType = EA_ORDER_NONE;
 int CrossoverBarIndex = -1;
 datetime CrossoverTime = 0;
 
@@ -1145,8 +896,6 @@ int LastProcessedBarForSignal = -1;
 
 //+------------------------------------------------------------------+
 //| FUNCTION: InitializeStrategy()                                   |
-//| Purpose: Initialize strategy system and validate data            |
-//| Returns: true on success, false on failure                       |
 //+------------------------------------------------------------------+
 bool InitializeStrategy() {
     LogInfo("Initializing Strategy System");
@@ -1160,17 +909,14 @@ bool InitializeStrategy() {
         return false;
     }
     
-    // Initialize EMA buffer
     ArrayInitialize(EMA_Buffer, 0.0);
     EMA_BufferIndex = 0;
     
-    // Initialize ADX buffer
     ArrayInitialize(ADX_Buffer, 0.0);
     ArrayInitialize(ADX_Plus_Buffer, 0.0);
     ArrayInitialize(ADX_Minus_Buffer, 0.0);
     ADX_BufferIndex = 0;
     
-    // Calculate initial values
     if (!CalculateEMA()) {
         LogError(ERR_EMA_NOT_READY, "InitializeStrategy", "Failed to calculate initial EMA");
         return false;
@@ -1192,8 +938,6 @@ bool InitializeStrategy() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: CalculateEMA()                                         |
-//| Purpose: Calculate EMA for current and previous bar              |
-//| Returns: true on success, false on failure                       |
 //+------------------------------------------------------------------+
 bool CalculateEMA() {
     double emaBar1 = iMA(Symbol(), Period(), EMA_Period, 0, MODE_EMA, PRICE_CLOSE, 1);
@@ -1224,9 +968,6 @@ bool CalculateEMA() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: GetEMAValue()                                          |
-//| Purpose: Get EMA value for specified bar                         |
-//| Input:   shift - bar index (1 = previous closed bar)             |
-//| Returns: EMA value, 0.0 on error                                 |
 //+------------------------------------------------------------------+
 double GetEMAValue(int shift) {
     if (shift < 0) {
@@ -1244,8 +985,6 @@ double GetEMAValue(int shift) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: IsEMAReady()                                           |
-//| Purpose: Check if EMA is ready for trading                       |
-//| Returns: true if ready, false otherwise                          |
 //+------------------------------------------------------------------+
 bool IsEMAReady() {
     if (!EMA_Ready) return false;
@@ -1256,8 +995,6 @@ bool IsEMAReady() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: UpdateEMA()                                            |
-//| Purpose: Update EMA values for new bar                           |
-//| Returns: true on success, false on failure                       |
 //+------------------------------------------------------------------+
 bool UpdateEMA() {
     return CalculateEMA();
@@ -1265,8 +1002,6 @@ bool UpdateEMA() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: CalculateADX()                                         |
-//| Purpose: Calculate ADX for current bar                           |
-//| Returns: true on success, false on failure                       |
 //+------------------------------------------------------------------+
 bool CalculateADX() {
     double adxBar1 = iADX(Symbol(), Period(), ADX_Period, PRICE_CLOSE, MODE_MAIN, 1);
@@ -1297,7 +1032,6 @@ bool CalculateADX() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: GetADXValue()                                          |
-//| Purpose: Get ADX value for specified bar                         |
 //+------------------------------------------------------------------+
 double GetADXValue(int shift) {
     if (shift < 0) return -1.0;
@@ -1306,7 +1040,6 @@ double GetADXValue(int shift) {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: IsADXReady()                                           |
-//| Purpose: Check if ADX is ready for trading                       |
 //+------------------------------------------------------------------+
 bool IsADXReady() {
     if (!ADX_Ready) return false;
@@ -1316,7 +1049,6 @@ bool IsADXReady() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: IsADXAboveThreshold()                                  |
-//| Purpose: Check if current ADX is above threshold                 |
 //+------------------------------------------------------------------+
 bool IsADXAboveThreshold() {
     if (!IsADXReady()) return false;
@@ -1331,7 +1063,6 @@ bool IsADXAboveThreshold() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: UpdateADX()                                            |
-//| Purpose: Update ADX values for new bar                           |
 //+------------------------------------------------------------------+
 bool UpdateADX() {
     return CalculateADX();
@@ -1339,7 +1070,6 @@ bool UpdateADX() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: GetCurrentADX()                                        |
-//| Purpose: Get current ADX value                                   |
 //+------------------------------------------------------------------+
 double GetCurrentADX() {
     return CurrentADX;
@@ -1347,7 +1077,6 @@ double GetCurrentADX() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: DetectCrossover()                                      |
-//| Purpose: Detect EMA crossover on closed bar                      |
 //+------------------------------------------------------------------+
 bool DetectCrossover() {
     double closeBar1 = GetCandleClose(1);
@@ -1368,7 +1097,7 @@ bool DetectCrossover() {
     if (closeBar2 <= emaBar2 && closeBar1 > emaBar1) {
         LogInfo("BULLISH CROSSOVER DETECTED on bar 1");
         CrossoverDetected = true;
-        CrossoverType = ORDER_TYPE_BUY;
+        CrossoverType = EA_ORDER_BUY;
         CrossoverBarIndex = 1;
         CrossoverTime = GetBarTime(1);
         return true;
@@ -1378,7 +1107,7 @@ bool DetectCrossover() {
     if (closeBar2 >= emaBar2 && closeBar1 < emaBar1) {
         LogInfo("BEARISH CROSSOVER DETECTED on bar 1");
         CrossoverDetected = true;
-        CrossoverType = ORDER_TYPE_SELL;
+        CrossoverType = EA_ORDER_SELL;
         CrossoverBarIndex = 1;
         CrossoverTime = GetBarTime(1);
         return true;
@@ -1389,130 +1118,52 @@ bool DetectCrossover() {
 
 //+------------------------------------------------------------------+
 //| FUNCTION: ResetCrossover()                                       |
-//| Purpose: Reset crossover detection state                         |
 //+------------------------------------------------------------------+
 void ResetCrossover() {
     CrossoverDetected = false;
-    CrossoverType = ORDER_TYPE_NONE;
+    CrossoverType = EA_ORDER_NONE;
     CrossoverBarIndex = -1;
     CrossoverTime = 0;
 }
 
 //+------------------------------------------------------------------+
-//| FUNCTION: IsBuySignalDetected()                                  |
-//| Purpose: Comprehensive BUY signal detection                      |
-//+------------------------------------------------------------------+
-bool IsBuySignalDetected() {
-    if (!StrategyInitialized) return false;
-    if (!IsEMAReady()) return false;
-    
-    if (!DetectCrossover()) return false;
-    if (CrossoverType != ORDER_TYPE_BUY) return false;
-    
-    double closeBar1 = GetCandleClose(1);
-    double emaBar1 = GetEMAValue(1);
-    
-    if (closeBar1 <= emaBar1) return false;
-    
-    double candleSize = GetCandleBodySize(1);
-    
-    if (candleSize < Candle_Size_Min_Pips || candleSize > Candle_Size_Max_Pips) return false;
-    
-    if (!IsBullishCandle(1)) return false;
-    
-    LogInfo("BUY SIGNAL DETECTED | Close: " + DoubleToString(closeBar1, Digits) + 
-            " | EMA: " + DoubleToString(emaBar1, Digits) + 
-            " | Size: " + DoubleToString(candleSize, 1) + " pips");
-    
-    Log1stCandleDetected(OP_BUY, candleSize, emaBar1);
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: IsSellSignalDetected()                                 |
-//| Purpose: Comprehensive SELL signal detection                     |
-//+------------------------------------------------------------------+
-bool IsSellSignalDetected() {
-    if (!StrategyInitialized) return false;
-    if (!IsEMAReady()) return false;
-    
-    if (!DetectCrossover()) return false;
-    if (CrossoverType != ORDER_TYPE_SELL) return false;
-    
-    double closeBar1 = GetCandleClose(1);
-    double emaBar1 = GetEMAValue(1);
-    
-    if (closeBar1 >= emaBar1) return false;
-    
-    double candleSize = GetCandleBodySize(1);
-    
-    if (candleSize < Candle_Size_Min_Pips || candleSize > Candle_Size_Max_Pips) return false;
-    
-    if (!IsBearishCandle(1)) return false;
-    
-    LogInfo("SELL SIGNAL DETECTED | Close: " + DoubleToString(closeBar1, Digits) + 
-            " | EMA: " + DoubleToString(emaBar1, Digits) + 
-            " | Size: " + DoubleToString(candleSize, 1) + " pips");
-    
-    Log1stCandleDetected(OP_SELL, candleSize, emaBar1);
-    
-    return true;
-}
-
-//+------------------------------------------------------------------+
-//| FUNCTION: UpdateStrategy()                                       |
-//| Purpose: Update strategy indicators for new bar                  |
-//+------------------------------------------------------------------+
-bool UpdateStrategy() {
-    if (!UpdateEMA()) return false;
-    if (!UpdateADX()) return false;
-    return true;
-}
-
-//+------------------------------------------------------------------+
 //| FUNCTION: CheckForNewSignal()                                    |
-//| Purpose: Check for new entry signal on bar close                 |
+//| Purpose: Check for new EMA crossover signal with candle size     |
 //+------------------------------------------------------------------+
-ENUM_ORDER_TYPE_EA CheckForNewSignal() {
-    int currentBar = iBarShift(Symbol(), Period(), GetBarTime(1));
+ENUM_EA_ORDER_TYPE CheckForNewSignal() {
+    if (!StrategyInitialized) return EA_ORDER_NONE;
+    if (!IsEMAReady()) return EA_ORDER_NONE;
     
-    if (currentBar == LastProcessedBarForSignal) {
-        return ORDER_TYPE_NONE;
+    // Update indicators
+    if (!UpdateEMA()) return EA_ORDER_NONE;
+    if (!UpdateADX()) return EA_ORDER_NONE;
+    
+    // Check for crossover
+    if (!DetectCrossover()) return EA_ORDER_NONE;
+    
+    // Validate candle body size for crossover candle (bar 1)
+    double candleSize = GetCandleBodySize(1);
+    
+    if (candleSize < Candle_Size_Min_Pips || candleSize > Candle_Size_Max_Pips) {
+        LogInfo("Candle size out of range: " + DoubleToString(candleSize, 1) + " pips (need " + 
+                IntegerToString(Candle_Size_Min_Pips) + "-" + IntegerToString(Candle_Size_Max_Pips) + ")");
+        ResetCrossover();
+        return EA_ORDER_NONE;
     }
     
-    if (!UpdateStrategy()) {
-        return ORDER_TYPE_NONE;
-    }
-    
-    ResetCrossover();
-    
-    if (IsBuySignalDetected()) {
-        LastProcessedBarForSignal = currentBar;
-        return ORDER_TYPE_BUY;
-    }
-    
-    if (IsSellSignalDetected()) {
-        LastProcessedBarForSignal = currentBar;
-        return ORDER_TYPE_SELL;
-    }
-    
-    return ORDER_TYPE_NONE;
+    return CrossoverType;
 }
 
 //+------------------------------------------------------------------+
 //| ================= SECTION 5: ENTRY SIGNALS ===================== |
 //| 2-Candle Confirmation State Machine                              |
-//| Estimated Lines: ~500                                            |
 //+------------------------------------------------------------------+
 
-// Entry signal constants
 #define MAX_CANDLE_AGE_BARS 5
 #define CONFIRMATION_TIMEOUT_BARS 10
 
-// Entry signal state machine
 ENUM_TRADE_PHASE EntryPhase = PHASE_NO_SIGNAL;
-ENUM_ORDER_TYPE_EA PendingSignalType = ORDER_TYPE_NONE;
+ENUM_EA_ORDER_TYPE PendingSignalType = EA_ORDER_NONE;
 
 // 1st Candle tracking
 bool FirstCandleDetected = false;
@@ -1560,7 +1211,7 @@ bool InitializeEntrySignals() {
 //+------------------------------------------------------------------+
 void ResetEntrySignalState() {
     EntryPhase = PHASE_NO_SIGNAL;
-    PendingSignalType = ORDER_TYPE_NONE;
+    PendingSignalType = EA_ORDER_NONE;
     
     FirstCandleDetected = false;
     FirstCandleBarIndex = -1;
@@ -1587,6 +1238,8 @@ void ResetEntrySignalState() {
     ReadyForEntry = false;
     ConfirmationStartTime = 0;
     ConfirmationAttempts = 0;
+    
+    ResetCrossover();
 }
 
 //+------------------------------------------------------------------+
@@ -1609,9 +1262,9 @@ bool Detect1stCandle() {
     if (!EntrySignalsInitialized) return false;
     if (FirstCandleDetected) return true;
     
-    ENUM_ORDER_TYPE_EA signalType = CheckForNewSignal();
+    ENUM_EA_ORDER_TYPE signalType = CheckForNewSignal();
     
-    if (signalType == ORDER_TYPE_NONE) return false;
+    if (signalType == EA_ORDER_NONE) return false;
     
     int barIndex = 1;
     
@@ -1631,14 +1284,14 @@ bool Detect1stCandle() {
     if (emaValue <= 0.0) return false;
     
     // Validate EMA cross
-    if (signalType == ORDER_TYPE_BUY && candleClose <= emaValue) return false;
-    if (signalType == ORDER_TYPE_SELL && candleClose >= emaValue) return false;
+    if (signalType == EA_ORDER_BUY && candleClose <= emaValue) return false;
+    if (signalType == EA_ORDER_SELL && candleClose >= emaValue) return false;
     
     int direction = GetCandleDirection(barIndex);
     if (direction == 0) return false;
     
-    if (signalType == ORDER_TYPE_BUY && direction != 1) return false;
-    if (signalType == ORDER_TYPE_SELL && direction != -1) return false;
+    if (signalType == EA_ORDER_BUY && direction != 1) return false;
+    if (signalType == EA_ORDER_SELL && direction != -1) return false;
     
     // Store 1st candle data
     FirstCandleDetected = true;
@@ -1656,7 +1309,7 @@ bool Detect1stCandle() {
     SetPhase(PHASE_1ST_CANDLE_DETECTED);
     ConfirmationStartTime = TimeCurrent();
     
-    LogInfo("1ST CANDLE DETECTED | Type: " + (signalType == ORDER_TYPE_BUY ? "BUY" : "SELL") + 
+    LogInfo("1ST CANDLE DETECTED | Type: " + (signalType == EA_ORDER_BUY ? "BUY" : "SELL") + 
             " | Size: " + DoubleToString(bodySize, 1) + " pips");
     
     return true;
@@ -1691,10 +1344,10 @@ bool Detect2ndCandle() {
     
     double bodySize = GetCandleBodySize(barIndex);
     
-    // Validate tolerance
+    // Validate tolerance (2nd candle must be at least 90% of 1st candle size)
     double minAcceptableSize = FirstCandleSize * (Candle_Size_Tolerance_Pct / 100.0);
     if (bodySize < minAcceptableSize) {
-        LogWarning("2nd candle too small");
+        LogWarning("2nd candle too small: " + DoubleToString(bodySize, 1) + " < " + DoubleToString(minAcceptableSize, 1));
         ResetEntrySignalState();
         return false;
     }
@@ -1702,7 +1355,7 @@ bool Detect2ndCandle() {
     // Also check it's not too large (max 110%)
     double maxAcceptableSize = FirstCandleSize * 1.10;
     if (bodySize > maxAcceptableSize) {
-        LogWarning("2nd candle too large");
+        LogWarning("2nd candle too large: " + DoubleToString(bodySize, 1) + " > " + DoubleToString(maxAcceptableSize, 1));
         ResetEntrySignalState();
         return false;
     }
@@ -1720,12 +1373,12 @@ bool Detect2ndCandle() {
         return false;
     }
     
-    // Validate close progression
-    if (PendingSignalType == ORDER_TYPE_BUY && candleClose < FirstCandleClose) {
+    // Validate close progression (2nd candle should continue in direction)
+    if (PendingSignalType == EA_ORDER_BUY && candleClose < FirstCandleClose) {
         ResetEntrySignalState();
         return false;
     }
-    if (PendingSignalType == ORDER_TYPE_SELL && candleClose > FirstCandleClose) {
+    if (PendingSignalType == EA_ORDER_SELL && candleClose > FirstCandleClose) {
         ResetEntrySignalState();
         return false;
     }
@@ -1749,7 +1402,7 @@ bool Detect2ndCandle() {
     LogInfo("2ND CANDLE CONFIRMED | Size: " + DoubleToString(bodySize, 1) + 
             " pips | Tolerance: " + DoubleToString(tolerancePercent, 1) + "%");
     
-    Log2ndCandleConfirmed(PendingSignalType == ORDER_TYPE_BUY ? OP_BUY : OP_SELL, bodySize, tolerancePercent);
+    Log2ndCandleConfirmed(PendingSignalType == EA_ORDER_BUY ? OP_BUY : OP_SELL, bodySize, tolerancePercent);
     
     return true;
 }
@@ -1777,7 +1430,7 @@ bool CheckEntryReadiness() {
     ReadyForEntry = true;
     SetPhase(PHASE_READY_FOR_ENTRY);
     
-    LogInfo("READY FOR ENTRY | Type: " + (PendingSignalType == ORDER_TYPE_BUY ? "BUY" : "SELL") + 
+    LogInfo("READY FOR ENTRY | Type: " + (PendingSignalType == EA_ORDER_BUY ? "BUY" : "SELL") + 
             " | ADX: " + DoubleToString(GetCurrentADX(), 2));
     
     return true;
@@ -1793,8 +1446,8 @@ bool IsReadyForEntry() {
 //+------------------------------------------------------------------+
 //| FUNCTION: GetPendingSignalType()                                 |
 //+------------------------------------------------------------------+
-ENUM_ORDER_TYPE_EA GetPendingSignalType() {
-    if (!IsReadyForEntry()) return ORDER_TYPE_NONE;
+ENUM_EA_ORDER_TYPE GetPendingSignalType() {
+    if (!IsReadyForEntry()) return EA_ORDER_NONE;
     return PendingSignalType;
 }
 
@@ -1806,9 +1459,9 @@ double GetEntryPrice() {
     
     RefreshRates();
     
-    if (PendingSignalType == ORDER_TYPE_BUY) {
+    if (PendingSignalType == EA_ORDER_BUY) {
         return NormalizePrice(Ask);
-    } else if (PendingSignalType == ORDER_TYPE_SELL) {
+    } else if (PendingSignalType == EA_ORDER_SELL) {
         return NormalizePrice(Bid);
     }
     
@@ -1879,7 +1532,6 @@ bool CheckForNewBar() {
 //+------------------------------------------------------------------+
 //| ================ SECTION 6: POSITION SIZING ==================== |
 //| Lot Calculation, Validation, and Basket Management               |
-//| Estimated Lines: ~400                                            |
 //+------------------------------------------------------------------+
 
 #define MAX_TOTAL_EXPOSURE_LOTS 1.0
@@ -1978,6 +1630,7 @@ bool AddAveragingOrderToBasket(int averagingTicket, double averagingEntryPrice) 
 
 //+------------------------------------------------------------------+
 //| FUNCTION: CalculateBasketProfit()                                |
+//| Purpose: Calculate combined profit (profit only, no swap/comm)   |
 //+------------------------------------------------------------------+
 double CalculateBasketProfit() {
     if (!Basket.isValid) return 0.0;
@@ -1985,17 +1638,14 @@ double CalculateBasketProfit() {
     double totalProfit = 0.0;
     
     // Calculate main order profit (profit only, excluding swap/commission)
-    if (Basket.mainOrderTicket > 0) {
-        if (OrderSelect(Basket.mainOrderTicket, SELECT_BY_TICKET)) {
-            totalProfit += OrderProfit();
-        }
+    if (Basket.mainOrderTicket > 0 && OrderSelect(Basket.mainOrderTicket, SELECT_BY_TICKET)) {
+        totalProfit += OrderProfit();  // Profit only
     }
     
-    // Calculate averaging order profit if exists
-    if (Basket.averagingTriggered && Basket.averagingOrderTicket > 0) {
-        if (OrderSelect(Basket.averagingOrderTicket, SELECT_BY_TICKET)) {
-            totalProfit += OrderProfit();
-        }
+    // Calculate averaging order profit
+    if (Basket.averagingTriggered && Basket.averagingOrderTicket > 0 && 
+        OrderSelect(Basket.averagingOrderTicket, SELECT_BY_TICKET)) {
+        totalProfit += OrderProfit();  // Profit only
     }
     
     Basket.basketProfit = totalProfit;
@@ -2067,7 +1717,6 @@ double UpdateCurrentExposure() {
 //+------------------------------------------------------------------+
 //| ============== SECTION 7: ORDER MANAGEMENT ===================== |
 //| Order Opening, Modification, and Closing                         |
-//| Estimated Lines: ~600                                            |
 //+------------------------------------------------------------------+
 
 #define MAX_OPEN_ATTEMPTS 3
@@ -2196,6 +1845,8 @@ int OM_OpenMarketOrder(string symbol, int orderType, double lots,
     int ticket = -1;
     int slippagePoints = GetSlippageInPoints(MaxAllowedSlippagePips);
     
+    color arrowColor = (orderType == OP_BUY) ? clrGreen : clrRed;
+    
     for (int attempt = 1; attempt <= MAX_OPEN_ATTEMPTS; attempt++) {
         RefreshRates();
         entryPrice = (orderType == OP_BUY) ? Ask : Bid;
@@ -2214,7 +1865,7 @@ int OM_OpenMarketOrder(string symbol, int orderType, double lots,
         
         ticket = OrderSend(symbol, orderType, normalizedLots, entryPrice, 
                           slippagePoints, normalizedSL, normalizedTP, 
-                          comment, magicNumber, 0, clrNONE);
+                          comment, magicNumber, 0, arrowColor);
         
         if (ticket > 0) {
             TotalOrdersOpened++;
@@ -2327,6 +1978,8 @@ bool OM_CloseOrderFull(int ticket) {
     
     if (lots <= 0) return false;
     
+    color arrowColor = (orderType == OP_BUY) ? clrRed : clrGreen;
+    
     for (int attempt = 1; attempt <= MAX_CLOSE_ATTEMPTS; attempt++) {
         RefreshRates();
         double closePrice = (orderType == OP_BUY) ? Bid : Ask;
@@ -2334,7 +1987,7 @@ bool OM_CloseOrderFull(int ticket) {
         
         ResetLastError();
         
-        bool success = OrderClose(ticket, lots, closePrice, slippagePoints, clrNONE);
+        bool success = OrderClose(ticket, lots, closePrice, slippagePoints, arrowColor);
         
         if (success) {
             TotalClosures++;
@@ -2381,6 +2034,8 @@ bool OM_CloseOrderPartial(int ticket, double lotsToClose) {
         normalizedLots = totalLots;
     }
     
+    color arrowColor = (orderType == OP_BUY) ? clrRed : clrGreen;
+    
     for (int attempt = 1; attempt <= MAX_CLOSE_ATTEMPTS; attempt++) {
         RefreshRates();
         double closePrice = (orderType == OP_BUY) ? Bid : Ask;
@@ -2388,7 +2043,7 @@ bool OM_CloseOrderPartial(int ticket, double lotsToClose) {
         
         ResetLastError();
         
-        bool success = OrderClose(ticket, normalizedLots, closePrice, slippagePoints, clrNONE);
+        bool success = OrderClose(ticket, normalizedLots, closePrice, slippagePoints, arrowColor);
         
         if (success) {
             TotalClosures++;
@@ -2470,7 +2125,6 @@ bool OM_CloseAllOrders(string symbol, int magicNumber) {
 //+------------------------------------------------------------------+
 //| ================ SECTION 8: TRADE MANAGEMENT =================== |
 //| Main Trade Logic, Trailing Stop, Averaging, Opposite Signal      |
-//| Estimated Lines: ~500                                            |
 //+------------------------------------------------------------------+
 
 // Trade management state
@@ -2487,8 +2141,38 @@ double CurrentTrailingStopLevel = 0.0;
 //| FUNCTION: HasOpenPosition()                                      |
 //+------------------------------------------------------------------+
 bool HasOpenPosition() {
-    return (OM_CountOpenOrders(Symbol(), MAGIC_MAIN_ORDER) > 0) ||
-           (OM_CountOpenOrders(Symbol(), MAGIC_AVERAGING) > 0);
+    // Check if we have any open orders with our magic numbers
+    int mainCount = OM_CountOpenOrders(Symbol(), MAGIC_MAIN_ORDER);
+    int avgCount = OM_CountOpenOrders(Symbol(), MAGIC_AVERAGING);
+    
+    if (mainCount > 0 || avgCount > 0) {
+        // Sync active ticket if needed
+        if (ActiveMainTicket <= 0) {
+            for (int i = 0; i < OrdersTotal(); i++) {
+                if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) {
+                    if (OrderSymbol() == Symbol() && OrderMagicNumber() == MAGIC_MAIN_ORDER) {
+                        if (OrderType() == OP_BUY || OrderType() == OP_SELL) {
+                            ActiveMainTicket = OrderTicket();
+                            ActiveOrderType = OrderType();
+                            ActiveEntryPrice = OrderOpenPrice();
+                            HighestPriceSinceEntry = (ActiveOrderType == OP_BUY) ? Bid : 0.0;
+                            LowestPriceSinceEntry = (ActiveOrderType == OP_SELL) ? Ask : 0.0;
+                            InitializeBasket(ActiveMainTicket, ActiveEntryPrice);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+    
+    // No positions, reset state
+    if (ActiveMainTicket > 0) {
+        ResetTradeState();
+    }
+    
+    return false;
 }
 
 //+------------------------------------------------------------------+
@@ -2496,7 +2180,6 @@ bool HasOpenPosition() {
 //+------------------------------------------------------------------+
 double GetCurrentDrawdownPips() {
     if (ActiveMainTicket <= 0) return 0.0;
-    
     if (!OrderSelect(ActiveMainTicket, SELECT_BY_TICKET)) return 0.0;
     
     double entryPrice = OrderOpenPrice();
@@ -2508,9 +2191,11 @@ double GetCurrentDrawdownPips() {
     double drawdown = 0.0;
     
     if (orderType == OP_BUY) {
-        drawdown = PriceToPips(currentPrice - entryPrice);
+        drawdown = PriceToPips(currentPrice - entryPrice);  // Negative if price went down
+        if (currentPrice < entryPrice) drawdown = -MathAbs(drawdown);
     } else {
-        drawdown = PriceToPips(entryPrice - currentPrice);
+        drawdown = PriceToPips(entryPrice - currentPrice);  // Negative if price went up
+        if (currentPrice > entryPrice) drawdown = -MathAbs(drawdown);
     }
     
     return drawdown;
@@ -2525,7 +2210,8 @@ bool CheckAveragingCondition() {
     
     double drawdown = GetCurrentDrawdownPips();
     
-    if (drawdown <= Averaging_Drawdown_Pips) {
+    // Averaging_Drawdown_Pips is positive (800), drawdown is negative when losing
+    if (drawdown <= -Averaging_Drawdown_Pips) {
         LogInfo("Averaging condition met | Drawdown: " + DoubleToString(drawdown, 1) + " pips");
         return true;
     }
@@ -2679,29 +2365,23 @@ bool CheckOppositeSignal() {
     
     int currentOrderType = OrderType();
     
-    // Check if an opposite signal has completed the 2-candle confirmation
-    // This happens when a full opposite signal is ready for entry
-    
-    // First, update entry signals to check for new pattern
-    if (!CheckForNewBar()) return false;
-    
     // Check for opposite signal detection
-    ENUM_ORDER_TYPE_EA newSignal = CheckForNewSignal();
+    ENUM_EA_ORDER_TYPE newSignal = CheckForNewSignal();
     
-    if (newSignal == ORDER_TYPE_NONE) return false;
+    if (newSignal == EA_ORDER_NONE) return false;
     
     // Check if this is opposite to current position
     bool isOpposite = false;
     
-    if (currentOrderType == OP_BUY && newSignal == ORDER_TYPE_SELL) {
+    if (currentOrderType == OP_BUY && newSignal == EA_ORDER_SELL) {
         isOpposite = true;
-    } else if (currentOrderType == OP_SELL && newSignal == ORDER_TYPE_BUY) {
+    } else if (currentOrderType == OP_SELL && newSignal == EA_ORDER_BUY) {
         isOpposite = true;
     }
     
     if (isOpposite) {
         LogInfo("OPPOSITE SIGNAL DETECTED - Current: " + (currentOrderType == OP_BUY ? "BUY" : "SELL") + 
-                " | New: " + (newSignal == ORDER_TYPE_BUY ? "BUY" : "SELL"));
+                " | New: " + (newSignal == EA_ORDER_BUY ? "BUY" : "SELL"));
     }
     
     return isOpposite;
@@ -2863,7 +2543,6 @@ void UpdateStatistics(double profit) {
 //+------------------------------------------------------------------+
 //| ================ SECTION 9: MAIN EA FUNCTIONS ================== |
 //| OnInit, OnDeinit, OnTick                                         |
-//| Estimated Lines: ~300                                            |
 //+------------------------------------------------------------------+
 
 //+------------------------------------------------------------------+
@@ -2967,8 +2646,11 @@ void OnTick() {
         
         UpdateHighLowTracking();
         
+        // Check for new bar to detect opposite signal
+        bool isNewBar = CheckForNewBar();
+        
         // Check for opposite signal (exit condition)
-        if (CheckOppositeSignal()) {
+        if (isNewBar && CheckOppositeSignal()) {
             // Calculate profit before closing
             double profit = CalculateBasketProfit();
             
@@ -3026,15 +2708,19 @@ void OnTick() {
         bool isNewBar = CheckForNewBar();
         
         if (isNewBar) {
+            // Update indicators
+            UpdateEMA();
+            UpdateADX();
+            
             // Update entry signal state machine
             UpdateEntrySignals();
             
             // Check if ready for entry
             if (IsReadyForEntry()) {
-                ENUM_ORDER_TYPE_EA signalType = GetPendingSignalType();
+                ENUM_EA_ORDER_TYPE signalType = GetPendingSignalType();
                 
-                if (signalType != ORDER_TYPE_NONE) {
-                    int orderType = (signalType == ORDER_TYPE_BUY) ? OP_BUY : OP_SELL;
+                if (signalType != EA_ORDER_NONE) {
+                    int orderType = (signalType == EA_ORDER_BUY) ? OP_BUY : OP_SELL;
                     double lots = GetInitialLots();
                     
                     RefreshRates();
